@@ -1,0 +1,101 @@
+---
+title: "Practical Machine Learning"
+author: "Jamas"
+date: "Tuesday, 14 April 2015"
+output: html_document
+---
+
+This is analysis and prediction of the "classe" variable in the Weight Lifting Exercise Details dataset, available at http://groupware.les.inf.puc-rio.br/har.
+
+The first step is to load the data and process it. There are a number of variables which are either all "NA" or contain a large amount of blank or error values. These variables are removed to leave a more complete dataset.
+
+```{r, results="hide"}
+library(caret)
+library(e1071)
+library(nnet)
+set.seed(16514)
+pml<-read.csv("pml-training.csv")
+pml[pml==""]<-NA
+pml[pml=="#DIV/0!"]<-NA
+pml2<-pml[,colSums(is.na(pml)) == 0]
+```
+
+The data is split into training (60%), testing (20%) and cross validation (20%) data sets. The number of cases for each value of classe in the training data is reported.
+
+```{r}
+inTrain<-createDataPartition(y=pml$classe,p=0.6,list=FALSE)
+pmltrain<-pml2[inTrain,]
+pml3<-pml2[-inTrain,]
+inTrain2<-createDataPartition(y=pml3$classe,p=0.5,list=FALSE)
+pmltest<-pml3[-inTrain2,]
+pmlcv<-pml3[-inTrain2,]
+table(pmltrain$classe)
+```
+
+To keep the analysis simple, five models are fitted on all variables (using the default settings).
+1. Linear Discriminant Analysis
+2. Penalised Multinomial Model
+3. CART
+4. Stochastic Gradient Boosting (GBM)
+5. Support Vector Machine with Linear Kernel
+(I remove the first seven columns as they only contain identification data.)
+
+```{r, results="hide"}
+pmltrain2<-pmltrain[,-(1:7)]
+mdllda<-train(classe~.,data=pmltrain2,method="lda")
+mdlmn<-multinom(classe~.,data=pmltrain2)
+mdltree<-train(classe~.,data=pmltrain2,method="rpart")
+fitControl <- trainControl(method="repeatedcv",
+                           number=5,
+                           repeats=1,
+                           verboseIter=TRUE)
+mdlgbm<-train(classe~.,data=pmltrain2,method="gbm",trControl=fitControl,verbose=FALSE)
+mdlsvm<-svm(classe~.,data=pmltrain2)
+```
+
+For each model we have the following summary statistics.
+
+```{r, echo=FALSE}
+c("LDA")
+confusionMatrix(pmltrain2$classe,predict(mdllda,pmltrain2))$overall
+c("Penalised Multinomial")
+confusionMatrix(pmltrain2$classe,predict(mdlmn,pmltrain2))$overall
+c("CART")
+confusionMatrix(pmltrain2$classe,predict(mdltree,pmltrain2))$overall
+c("GBM")
+confusionMatrix(pmltrain2$classe,predict(mdlgbm,pmltrain2))$overall
+c("SVM")
+confusionMatrix(pmltrain2$classe,predict(mdlsvm,pmltrain2))$overall
+```
+
+To evaluate which model is preferred, all models are run on the test data, and the one with the highest accuracy is chosen.
+
+```{r, echo=FALSE}
+c("LDA")
+confusionMatrix(pmltest$classe,predict(mdllda,pmltest))$overall
+c("Penalised Multinomial")
+confusionMatrix(pmltest$classe,predict(mdlmn,pmltest))$overall
+c("CART")
+confusionMatrix(pmltest$classe,predict(mdltree,pmltest))$overall
+c("GBM")
+confusionMatrix(pmltest$classe,predict(mdlgbm,pmltest))$overall
+c("SVM")
+confusionMatrix(pmltest$classe,predict(mdlsvm,pmltest))$overall
+```
+
+The better model is Stochastic Gradient Boosting (GBM).
+
+This model is applied to the cross-validation set to get the Out of Sample estimate.
+
+```{r, echo=FALSE}
+confusionMatrix(pmlcv$classe,predict(mdlgbm,pmlcv))$overall
+```
+
+This is then a 96.3% accuracy rate, or 3.7% (3.1-4.3) error rate.
+
+This is now applied to the given test data to predict the responses.
+
+```{r, results='hide'}
+pmlin<-read.csv("pml-testing.csv")
+newin<-predict(mdlgbm,pmlin)
+```
